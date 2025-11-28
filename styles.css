@@ -1297,3 +1297,192 @@ body {
     transform: translateY(-6px);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   NEW WEBSITE BUTTON
+   ═══════════════════════════════════════════════════════════════ */
+
+.new-website-btn {
+  width: 100%;
+  padding: 10px 16px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 4px rgba(232, 93, 117, 0.2);
+}
+
+.new-website-btn:hover {
+  background: #f06b84;
+  box-shadow: 0 3px 8px rgba(232, 93, 117, 0.3);
+  transform: translateY(-1px);
+}
+
+.new-website-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(232, 93, 117, 0.2);
+}
+
+.new-website-btn .plus-icon {
+  font-size: 18px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PROCESS MESSAGES (Agent Commands/Steps)
+   ═══════════════════════════════════════════════════════════════ */
+
+.message-bubble.process-message {
+  background: var(--charcoal);
+  border: 1px solid var(--ash);
+  padding: 0;
+  overflow: hidden;
+  max-width: 85%;
+}
+
+.process-header {
+  background: linear-gradient(90deg, var(--ash), var(--charcoal));
+  color: var(--sky);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--ash);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.process-content {
+  padding: 12px;
+  font-family: 'SF Mono', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--lime);
+  background: var(--ink);
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.process-content::-webkit-scrollbar {
+  height: 4px;
+}
+
+.process-content::-webkit-scrollbar-thumb {
+  background: var(--ash);
+  border-radius: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MARKDOWN FORMATTING IN MESSAGES
+   ═══════════════════════════════════════════════════════════════ */
+
+.message-bubble h1,
+.message-bubble h2,
+.message-bubble h3 {
+  margin: 12px 0 8px 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.message-bubble h1 {
+  font-size: 18px;
+  border-bottom: 2px solid var(--line);
+  padding-bottom: 6px;
+}
+
+.message-bubble h2 {
+  font-size: 16px;
+}
+
+.message-bubble h3 {
+  font-size: 14px;
+  color: var(--accent);
+}
+
+.message-bubble p {
+  margin: 8px 0;
+  line-height: 1.6;
+}
+
+.message-bubble ul {
+  margin: 8px 0;
+  padding-left: 20px;
+  list-style-type: disc;
+}
+
+.message-bubble li {
+  margin: 4px 0;
+  line-height: 1.5;
+}
+
+.message-bubble strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.message-bubble em {
+  font-style: italic;
+  color: var(--text-dim);
+}
+
+.message-bubble code.inline-code {
+  font-family: 'SF Mono', 'Courier New', monospace;
+  font-size: 12px;
+  background: var(--charcoal);
+  border: 1px solid var(--line);
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: var(--lime);
+}
+
+.message-bubble a {
+  color: var(--sky);
+  text-decoration: underline;
+  transition: color 0.15s ease;
+}
+
+.message-bubble a:hover {
+  color: var(--accent);
+}
+
+.message-bubble .emoji-header {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 12px 0 8px 0;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Ajuster le style pour les messages utilisateur */
+.message-row.user .message-bubble strong,
+.message-row.user .message-bubble em,
+.message-row.user .message-bubble h1,
+.message-row.user .message-bubble h2,
+.message-row.user .message-bubble h3,
+.message-row.user .message-bubble .emoji-header {
+  color: #fff;
+}
+
+.message-row.user .message-bubble code.inline-code {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+.message-row.user .message-bubble a {
+  color: #fff;
+  text-decoration: underline;
+}

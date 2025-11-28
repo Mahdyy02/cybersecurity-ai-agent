@@ -19,6 +19,8 @@ const currentSiteNameEl = document.getElementById("current-site-name");
 const chatMessagesEl = document.getElementById("chat-messages");
 const chatFormEl = document.getElementById("chat-form");
 const userInputEl = document.getElementById("user-input");
+const newWebsiteBtn = document.getElementById("new-website-btn");
+const appLogo = document.getElementById("app-logo");
 
 // -------------------------------
 // Fonctions d'affichage
@@ -145,7 +147,7 @@ function renderConversation() {
 
   const msgs = conversations[currentSiteId] || [];
 
-  msgs.forEach((msg) => {
+  msgs.forEach((msg, index) => {
     const row = document.createElement("div");
     row.className = `message-row ${msg.from}`;
 
@@ -156,14 +158,34 @@ function renderConversation() {
     if (msg.isTyping) {
       bubble.classList.add("typing");
       bubble.innerHTML = `<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>`;
+    } else if (msg.isProcess) {
+      // Affichage spécial pour les process/commandes
+      bubble.classList.add("process-message");
+      bubble.innerHTML = `<div class="process-header">⚙️ Agent Process</div><pre class="process-content">${escapeHtml(msg.text)}</pre>`;
     } else {
-      // Préserver les retours à la ligne
-      bubble.style.whiteSpace = "pre-wrap";
-      bubble.textContent = msg.text;
+      // Convertir le Markdown en HTML pour les messages de l'agent
+      if (msg.from === "agent") {
+        bubble.innerHTML = formatMarkdown(msg.text);
+      } else {
+        // Messages utilisateur : préserver les retours à la ligne
+        bubble.style.whiteSpace = "pre-wrap";
+        bubble.textContent = msg.text;
+      }
     }
 
+    // Animation d'entrée progressive
+    bubble.style.opacity = "0";
+    bubble.style.transform = "translateY(10px)";
+    
     row.appendChild(bubble);
     chatMessagesEl.appendChild(row);
+    
+    // Déclencher l'animation
+    setTimeout(() => {
+      bubble.style.transition = "all 0.3s ease";
+      bubble.style.opacity = "1";
+      bubble.style.transform = "translateY(0)";
+    }, index * 50);
   });
 
   // Scroll automatique vers le bas
@@ -265,8 +287,76 @@ function detectSiteLocally(prompt, fallbackUrl) {
 }
 
 // -------------------------------
+// Fonction utilitaire pour échapper le HTML
+// -------------------------------
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// -------------------------------
+// Fonction pour formater le Markdown en HTML
+// -------------------------------
+function formatMarkdown(text) {
+  let html = escapeHtml(text);
+  
+  // Gras: **texte** ou __texte__
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
+  
+  // Italique: *texte* ou _texte_
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/_(.+?)_/g, '<em>$1</em>');
+  
+  // Code inline: `code`
+  html = html.replace(/`(.+?)`/g, '<code class="inline-code">$1</code>');
+  
+  // Liens: [texte](url)
+  html = html.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  
+  // Titres: ### Titre
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  
+  // Listes à puces: - item ou * item ou • item
+  html = html.replace(/^[•\-\*] (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+  
+  // Listes numérotées: 1. item
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  
+  // Emojis avec texte (comme 🚨 Critical Issues:)
+  html = html.replace(/^([🔍🚨💡📊⚠️✅✓⚙️📝🎯💉📍🔒]+)\s*\*\*(.+?)\*\*:?/gm, '<div class="emoji-header">$1 <strong>$2</strong></div>');
+  
+  // Retours à la ligne
+  html = html.replace(/\n\n/g, '</p><p>');
+  html = html.replace(/\n/g, '<br>');
+  
+  // Envelopper dans un paragraphe
+  html = '<p>' + html + '</p>';
+  
+  // Nettoyer les paragraphes vides
+  html = html.replace(/<p><\/p>/g, '');
+  html = html.replace(/<p><br><\/p>/g, '');
+  
+  return html;
+}
+
+// -------------------------------
 // Gestion du formulaire de chat
 // -------------------------------
+
+// Gestion de la touche Entrée dans le textarea
+userInputEl.addEventListener("keydown", (event) => {
+  // Si Entrée est pressée sans Shift
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    chatFormEl.dispatchEvent(new Event("submit"));
+  }
+});
+
 chatFormEl.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -341,23 +431,65 @@ chatFormEl.addEventListener("submit", async (event) => {
   // Recharger la liste des sites depuis le backend
   await loadSitesFromBackend();
 
-  // Si un site a été détecté/créé, le sélectionner et charger l'historique complet
+  // Si un site a été détecté/créé, le sélectionner
+  let targetSiteId = currentSiteId;
   if (agentData.site) {
     const siteInfo = normalizeSiteFromBackend(agentData.site);
     if (siteInfo) {
       // Trouver le site dans la liste rechargée
       const site = sites.find((s) => s.url === siteInfo.url);
       if (site) {
-        // Sélectionner ce site et recharger son historique depuis la BDD
+        targetSiteId = site.id;
         currentSiteId = site.id;
         currentSiteNameEl.textContent = site.label;
         renderSiteList();
-        await loadSiteHistory(site.id);
       }
     }
-  } else if (currentSiteId) {
-    // Pas de nouveau site, juste recharger l'historique du site actuel
-    await loadSiteHistory(currentSiteId);
+  }
+
+  // Ajouter les messages de process et de réponse
+  if (targetSiteId) {
+    if (!conversations[targetSiteId]) {
+      conversations[targetSiteId] = [];
+    }
+    
+    // Ajouter le message utilisateur s'il n'est pas déjà là
+    const lastMsg = conversations[targetSiteId][conversations[targetSiteId].length - 1];
+    if (!lastMsg || lastMsg.text !== prompt) {
+      conversations[targetSiteId].push({
+        from: "user",
+        text: prompt
+      });
+    }
+    
+    // Ajouter les process steps si disponibles
+    if (agentData.metadata && agentData.metadata.process_steps && agentData.metadata.process_steps.length > 0) {
+      const processText = agentData.metadata.process_steps.join("\n");
+      conversations[targetSiteId].push({
+        from: "agent",
+        text: processText,
+        isProcess: true
+      });
+    }
+    
+    // Ajouter la réponse de l'agent (nettoyer le formatage Markdown)
+    let cleanedReply = agentData.reply;
+    
+    // Retirer les backticks au début et à la fin
+    cleanedReply = cleanedReply.trim();
+    if (cleanedReply.startsWith('```')) {
+      // Retirer le premier bloc de code
+      cleanedReply = cleanedReply.replace(/^```[a-z]*\n?/i, '');
+      // Retirer le dernier bloc de code
+      cleanedReply = cleanedReply.replace(/\n?```$/i, '');
+    }
+    
+    conversations[targetSiteId].push({
+      from: "agent",
+      text: cleanedReply
+    });
+    
+    renderConversation();
   }
 });
 
@@ -418,7 +550,8 @@ async function loadSiteHistory(siteId) {
     // Charger les messages de conversation
     conversations[siteId] = data.conversation.map((msg) => ({
       from: msg.role === "user" ? "user" : "agent",
-      text: msg.content
+      text: msg.content,
+      isProcess: msg.role === "process"
     }));
     
     renderConversation();
@@ -427,6 +560,30 @@ async function loadSiteHistory(siteId) {
     console.error("Error loading site history:", error);
   }
 }
+
+// -------------------------------
+// Event Listener : Bouton New Website
+// -------------------------------
+newWebsiteBtn.addEventListener("click", () => {
+  // Désélectionner le site actuel
+  currentSiteId = null;
+  currentSiteNameEl.textContent = "Aucun site sélectionné";
+  renderSiteList();
+  renderConversation();
+  
+  // Focus sur l'input
+  userInputEl.focus();
+});
+
+// -------------------------------
+// Event Listener : Logo cliquable
+// -------------------------------
+appLogo.addEventListener("click", () => {
+  // Confirmer avant de rafraîchir
+  if (confirm("Voulez-vous vraiment rafraîchir la page ? Les conversations non sauvegardées seront perdues.")) {
+    location.reload();
+  }
+});
 
 // -------------------------------
 // Initialisation

@@ -413,9 +413,16 @@ class DatabaseManager:
     
     def _normalize_url(self, url: str) -> str:
         """Normalize URL for consistent storage"""
+        # Ensure url is a string (handle bytes from some database drivers)
+        if isinstance(url, bytes):
+            url = url.decode('utf-8')
+        
+        # Convert to string if needed
+        url = str(url)
+        
         parsed = urlparse(url)
         # Remove trailing slash for consistency
-        path = parsed.path.rstrip('/')
+        path = parsed.path.rstrip('/') if parsed.path else ''
         normalized = f"{parsed.scheme}://{parsed.netloc}{path}"
         if parsed.query:
             normalized += f"?{parsed.query}"
@@ -608,6 +615,8 @@ class DatabaseManager:
         Returns:
             Dictionary with all website information or None if not found
         """
+        import json
+        
         url = self._normalize_url(url)
         session = self.get_session()
         
@@ -619,20 +628,59 @@ class DatabaseManager:
             if not website:
                 return None
             
+            # Helper to deserialize JSON fields (handles dict, bytes, and str)
+            def deserialize_json(value):
+                if value is None:
+                    return None
+                
+                # Already a Python object (dict/list)
+                if isinstance(value, (dict, list)):
+                    return value
+                
+                # Handle bytes (from some database drivers)
+                if isinstance(value, bytes):
+                    try:
+                        decoded = value.decode('utf-8')
+                        return json.loads(decoded)
+                    except Exception as e:
+                        print(f"[DB] Error decoding bytes to JSON: {e}")
+                        return None
+                
+                # Handle string (might be JSON string or plain text)
+                if isinstance(value, str):
+                    # Empty string
+                    if not value.strip():
+                        return None
+                    
+                    # Try to parse as JSON
+                    try:
+                        return json.loads(value)
+                    except json.JSONDecodeError:
+                        # Not JSON, return as plain string (shouldn't happen with JSON columns)
+                        print(f"[DB] Value is not valid JSON, returning as string: {value[:50]}...")
+                        return value
+                    except Exception as e:
+                        print(f"[DB] Error parsing string as JSON: {e}")
+                        return None
+                
+                # Unknown type, return as-is
+                print(f"[DB] Unknown type for JSON field: {type(value)}")
+                return value
+            
             return {
                 'url': website.url,
                 'domain': website.domain,
                 'scheme': website.scheme,
                 'path': website.path,
-                'http_headers': website.http_headers,
+                'http_headers': deserialize_json(website.http_headers),
                 'http_status_code': website.http_status_code,
-                'dns_records': website.dns_records,
-                'ip_addresses': website.ip_addresses,
-                'open_ports': website.open_ports,
+                'dns_records': deserialize_json(website.dns_records),
+                'ip_addresses': deserialize_json(website.ip_addresses),
+                'open_ports': deserialize_json(website.open_ports),
                 'total_open_ports': website.total_open_ports,
-                'whois_data': website.whois_data,
+                'whois_data': deserialize_json(website.whois_data),
                 'registrar': website.registrar,
-                'additional_info': website.additional_info,
+                'additional_info': deserialize_json(website.additional_info),
                 'first_scan': website.first_scan.isoformat(),
                 'last_updated': website.last_updated.isoformat(),
                 'scan_count': website.scan_count
