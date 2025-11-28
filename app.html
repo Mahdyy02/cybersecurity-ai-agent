@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Security Agent - Console</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar gauche : liste des sites analysés -->
+    <aside class="sidebar">
+      <h1 class="logo">AI Security Agent</h1>
+
+      <div class="sidebar-section">
+        <h2>Sites analysés</h2>
+        <ul id="site-list" class="site-list">
+          <!-- Les sites seront ajoutés ici avec JavaScript -->
+        </ul>
+      </div>
+
+      <div class="sidebar-section">
+        <p class="sidebar-hint">
+          Les sites sont ajoutés automatiquement<br />
+          à partir des réponses du LLM.
+        </p>
+      </div>
+    </aside>
+
+    <!-- Partie centrale : chat avec l'agent -->
+    <main class="chat-area">
+      <header class="chat-header">
+        <div>
+          <h2 id="current-site-name">Aucun site sélectionné</h2>
+
+        </div>
+      </header>
+
+      <section id="chat-messages" class="chat-messages">
+        <!-- Messages du chat ajoutés via JavaScript -->
+      </section>
+
+      <form id="chat-form" class="chat-input-area">
+        <textarea
+          id="user-input"
+          rows="2"
+          placeholder="Écris ton prompt ici (ex: Analyse facebook.com pour les vulnérabilités XSS)..."
+          required
+        ></textarea>
+        <button type="submit" class="primary-btn">Envoyer</button>
+      </form>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
