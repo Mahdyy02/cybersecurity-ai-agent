@@ -111,6 +111,7 @@ async def chat_with_agent(
         # Extract site information from result
         detected_url = result.get('url') or url
         response_text = result.get('response', 'Analysis completed.')
+        process_steps = result.get('process_steps', [])
         
         # Normalize site URL if found
         if detected_url:
@@ -129,6 +130,12 @@ async def chat_with_agent(
             
             # Save conversation messages
             db.save_conversation_message(session_id, "user", request.prompt)
+            
+            # Save process steps as a separate message (before main response)
+            if process_steps:
+                process_text = "\n".join(process_steps)
+                db.save_conversation_message(session_id, "process", process_text)
+            
             db.save_conversation_message(session_id, "assistant", response_text)
             
             # Also keep in active_sessions for backward compatibility
@@ -144,6 +151,7 @@ async def chat_with_agent(
             reply=response_text,
             metadata={
                 "timestamp": datetime.now().isoformat(),
+                "process_steps": process_steps,
                 "tools_executed": result.get('tools_executed', []),
                 "execution_time": result.get('execution_time', 0)
             }

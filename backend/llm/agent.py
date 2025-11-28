@@ -179,7 +179,10 @@ class SecurityAgent:
         }
         
         try:
-            if action_name == 'info_gathering':
+            if action_name == 'query_database':
+                result = await self._query_database(url, params.get('query_type', 'all'))
+            
+            elif action_name == 'info_gathering':
                 result = await self._run_info_gathering(url)
             
             elif action_name == 'vulnerability_scan':
@@ -355,6 +358,76 @@ class SecurityAgent:
                 'message': str(e)
             }
     
+    async def _query_database(self, url: str, query_type: str = 'all') -> Dict:
+        """Query database for existing information"""
+        Logger.info(f"Querying database for: {query_type}")
+        
+        results = {
+            'action': 'query_database',
+            'status': 'success',
+            'data': {},
+            'message': ''
+        }
+        
+        try:
+            # Get website info
+            if query_type in ['all', 'info', 'ports']:
+                try:
+                    website_info = self.db.get_website_info(url)
+                    if website_info:
+                        results['data']['website_info'] = website_info
+                        Logger.success(f"Found website info for {url}")
+                    else:
+                        # Fallback to old format
+                        db_info = self.db.get_info_records(url)
+                        if db_info:
+                            results['data']['info_records'] = db_info
+                            Logger.success(f"Found {len(db_info)} info records for {url}")
+                except Exception as e:
+                    Logger.error(f"Error fetching website info: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Get vulnerabilities
+            if query_type in ['all', 'vulnerabilities', 'vulns']:
+                try:
+                    db_vulns = self.db.get_vulnerability_records(url)
+                    if db_vulns:
+                        results['data']['vulnerabilities'] = db_vulns
+                        Logger.success(f"Found {len(db_vulns)} vulnerabilities for {url}")
+                except Exception as e:
+                    Logger.error(f"Error fetching vulnerabilities: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Check if we found any data
+            if not results['data']:
+                results['status'] = 'not_found'
+                results['message'] = f"No data found for {url}. Would you like me to scan it?"
+            else:
+                # Count findings
+                vuln_count = len(results['data'].get('vulnerabilities', []))
+                info_available = 'website_info' in results['data'] or 'info_records' in results['data']
+                
+                parts = []
+                if info_available:
+                    parts.append("website information")
+                if vuln_count > 0:
+                    parts.append(f"{vuln_count} vulnerabilities")
+                
+                results['message'] = f"Found {' and '.join(parts)} in database"
+            
+            return results
+            
+        except Exception as e:
+            Logger.error(f"Database query error: {str(e)}")
+            return {
+                'action': 'query_database',
+                'status': 'error',
+                'data': None,
+                'message': f"Error querying database: {str(e)}"
+            }
+    
     async def _display_info(self, url: str) -> Dict:
         """Display cached information (using consolidated website info)"""
         # Try new consolidated format first
@@ -414,61 +487,120 @@ class SecurityAgent:
             }
     
     async def summarize_results(self, results: List[Dict]) -> str:
-        """Summarize results using LLM"""
+        """Summarize results using LLM with ACTUAL data"""
         Logger.info("Generating summary...")
         
         try:
-            # Prepare condensed data for summarization
-            summary_parts = []
+            # Prepare detailed data for summarization with ACTUAL findings
+            detailed_data = []
             
             for result in results:
                 action = result.get('action', 'unknown')
                 status = result.get('status', 'unknown')
-                message = result.get('message', '')
                 data = result.get('data', [])
                 
-                # Create a condensed summary for each action
-                if action == 'info_gathering':
-                    data_count = len(data) if data else 0
-                    summary_parts.append(f"✓ Information Gathering: {status.upper()} - {data_count} records collected")
-                    
-                elif action == 'vulnerability_scan':
-                    vuln_count = len(data) if data else 0
-                    summary_parts.append(f"✓ Vulnerability Scan: {status.upper()} - {vuln_count} issues found")
-                    
-                elif action == 'exploit_validation':
-                    exploit_count = len(data) if data else 0
-                    summary_parts.append(f"✓ Exploit Validation: {status.upper()} - {exploit_count} validated")
-                    
-                elif action in ['display_info', 'display_vulnerabilities']:
-                    data_count = len(data) if data else 0
-                    summary_parts.append(f"✓ {action}: {status.upper()} - {data_count} records retrieved")
+                if action == 'query_database' and status == 'success':
+                    # Extract actual data from database query
+                    if isinstance(data, dict):
+                        # Vulnerabilities
+                        if 'vulnerabilities' in data:
+                            for vuln in data['vulnerabilities'][:10]:  # Limit to 10 for token size
+                                detailed_data.append({
+                                    'type': 'vulnerability',
+                                    'name': vuln.get('type', 'Unknown'),
+                                    'location': vuln.get('url', 'Unknown'),
+                                    'severity': vuln.get('severity', 'Unknown'),
+                                    'details': vuln.get('details', 'No details'),
+                                    'recommendation': vuln.get('recommendation', 'No recommendation')
+                                })
+                        
+                        # Website info
+                        if 'website_info' in data:
+                            info = data['website_info']
+                            detailed_data.append({
+                                'type': 'website_info',
+                                'data': info
+                            })
+                        elif 'info_records' in data:
+                            detailed_data.append({
+                                'type': 'info_records',
+                                'count': len(data['info_records']),
+                                'sample': data['info_records'][:5]
+                            })
+                
+                elif action == 'info_gathering' and data:
+                    detailed_data.append({
+                        'type': 'info_gathering_results',
+                        'count': len(data),
+                        'sample': data[:5]
+                    })
+                
+                elif action == 'vulnerability_scan' and data:
+                    for vuln in data[:10]:  # Limit to 10
+                        detailed_data.append({
+                            'type': 'vulnerability',
+                            'name': vuln.get('Type', vuln.get('type', 'Unknown')),
+                            'location': vuln.get('URL', vuln.get('url', 'Unknown')),
+                            'severity': vuln.get('Severity', vuln.get('severity', 'Unknown')),
+                            'details': vuln.get('Details', vuln.get('details', 'No details')),
+                            'recommendation': vuln.get('Recommendation', vuln.get('recommendation', 'No recommendation'))
+                        })
+                
+                elif action == 'exploit_validation' and data:
+                    for exploit in data[:5]:
+                        detailed_data.append({
+                            'type': 'exploit_result',
+                            'vulnerability': exploit.get('Type', 'Unknown'),
+                            'success': exploit.get('Status', 'Unknown'),
+                            'details': exploit.get('Details', 'No details')
+                        })
             
-            # Create compact summary for LLM
-            summary_text = "\n".join(summary_parts)
-            summary_text += f"\n\nTotal actions completed: {len(results)}"
+            # If no data found, return simple message
+            if not detailed_data:
+                if any(r.get('status') == 'not_found' for r in results):
+                    return "No data found in the database for this website. Would you like me to perform a security scan?"
+                return "No significant findings to report."
             
-            # Call LLM with condensed summary
+            # Convert to JSON string for LLM
+            data_json = json.dumps(detailed_data, indent=2)
+            
+            # Call LLM with ACTUAL data
             response = await generate_chatbot_response(
                 system_prompt=RESULT_SUMMARIZER_PROMPT,
-                user_message=f"Security scan results:\n{summary_text}",
-                temperature=0.5,
-                max_tokens=500
+                user_message=f"ACTUAL SECURITY SCAN DATA (JSON format):\n\n{data_json}",
+                temperature=0.4,
+                max_tokens=1000
             )
             
-            if response and response != "None":
+            if response and response != "None" and not response.startswith("Error"):
                 return response
             else:
-                # Fallback to simple summary
-                return summary_text
+                # Fallback: Create a simple summary from the data
+                return self._create_fallback_summary(detailed_data)
         
         except Exception as e:
             Logger.error(f"Summarization error: {str(e)}")
-            # Return a basic summary as fallback
-            summary = []
-            for result in results:
-                summary.append(f"{result.get('action', 'Action')}: {result.get('message', 'No message')}")
-            return "\n".join(summary) if summary else "Operations completed."
+            return self._create_fallback_summary(detailed_data if 'detailed_data' in locals() else [])
+    
+    def _create_fallback_summary(self, data: List[Dict]) -> str:
+        """Create a basic summary when LLM fails"""
+        if not data:
+            return "Operations completed. No significant findings."
+        
+        vulns = [d for d in data if d.get('type') == 'vulnerability']
+        exploits = [d for d in data if d.get('type') == 'exploit_result']
+        
+        summary = "🔍 Security Assessment Results\n\n"
+        
+        if vulns:
+            summary += f"Found {len(vulns)} vulnerabilities:\n"
+            for v in vulns[:5]:
+                summary += f"- {v.get('name')} at {v.get('location')} (Severity: {v.get('severity')})\n"
+        
+        if exploits:
+            summary += f"\n{len(exploits)} exploits validated\n"
+        
+        return summary
     
     async def process_user_message(self, user_message: str) -> Dict:
         """
@@ -477,15 +609,26 @@ class SecurityAgent:
         """
         Logger.banner("Processing User Message")
         
+        # Track process steps for frontend display
+        process_steps = []
+        
         # Step 1: Extract URL
+        process_steps.append("🔍 Extracting URL from message...")
         url = await self.extract_url(user_message)
         if url:
             self.current_url = url
+            process_steps.append(f"✓ URL detected: {url}")
         elif self.current_url:
             url = self.current_url
+            process_steps.append(f"✓ Using current URL: {url}")
+        else:
+            process_steps.append("⚠ No URL found")
         
         # Step 2: Analyze intent and create plan
+        process_steps.append("🤖 Analyzing intent and creating execution plan...")
         plan = await self.analyze_intent(user_message, url)
+        if plan.get('actions'):
+            process_steps.append(f"✓ Plan created: {len(plan['actions'])} action(s) to execute")
         
         # Step 3: Check if immediate response needed
         if plan.get('display_to_user') and not plan.get('actions'):
@@ -493,13 +636,17 @@ class SecurityAgent:
                 'status': 'completed',
                 'plan': plan,
                 'results': [],
-                'response': plan['display_to_user']
+                'response': plan['display_to_user'],
+                'process_steps': process_steps
             }
         
         # Step 4: Execute actions
         results = []
         for action in plan.get('actions', []):
-            if not url:
+            action_name = action.get('action', 'unknown')
+            process_steps.append(f"⚙️ Executing: {action_name}...")
+            
+            if not url and action_name != 'query_database':
                 results.append({
                     'action': action.get('action'),
                     'status': 'error',
@@ -507,8 +654,14 @@ class SecurityAgent:
                 })
                 continue
             
-            # Check database if needed
-            if plan.get('check_database'):
+            # Special handling for query_database action
+            if action_name == 'query_database':
+                query_type = plan.get('query_type', 'all')
+                action['params'] = action.get('params', {})
+                action['params']['query_type'] = query_type
+            
+            # Check database if needed (for scan actions)
+            if plan.get('check_database') and action_name != 'query_database':
                 if action['action'] == 'info_gathering':
                     # Check if cache is valid (less than 3 days old)
                     if self.db.check_cache_valid(url, 'info', max_age_days=3):
@@ -541,18 +694,29 @@ class SecurityAgent:
             result = await self.execute_action(action, url)
             results.append(result)
             
+            # Add completion status
+            if result.get('status') == 'success':
+                process_steps.append(f"✓ {action_name} completed successfully")
+            elif result.get('status') == 'cached':
+                process_steps.append(f"✓ {action_name} retrieved from cache")
+            else:
+                process_steps.append(f"✗ {action_name} failed: {result.get('message', 'Unknown error')}")
+            
             # Wait for completion if needed
             if action.get('wait_for_completion'):
                 await asyncio.sleep(0.1)
         
         # Step 5: Generate summary
+        process_steps.append("📝 Generating summary...")
         summary = await self.summarize_results(results)
+        process_steps.append("✓ Summary generated")
         
         return {
             'status': 'completed',
             'plan': plan,
             'results': results,
             'response': summary,
+            'process_steps': process_steps,
             'needs_confirmation': plan.get('needs_user_confirmation', False),
             'confirmation_message': plan.get('confirmation_message')
         }
