@@ -1,0 +1,26 @@
+# Web Framework
+fastapi
+uvicorn[standard]
+
+# HTTP Client
+httpx
+requests
+
+# Database
+sqlalchemy
+psycopg2-binary
+
+# Data Validation
+pydantic
+
+# HTML Parsing
+beautifulsoup4
+
+# Environment Variables
+python-dotenv
+
+# Terminal Colors
+colorama
+
+# Utilities
+python-multipart

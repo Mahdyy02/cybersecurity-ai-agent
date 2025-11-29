@@ -28,7 +28,6 @@ results/
 output/
 *.csv
 *.log
-*.txt
 test_results/
 
 # IDE
