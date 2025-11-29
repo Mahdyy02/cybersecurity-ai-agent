@@ -97,16 +97,34 @@ async def chat_with_agent(
     try:
         logger.info(f"Processing chat request: {request.prompt[:100]}...")
         
+        db = get_db_manager()
+        
+        # Get conversation history if sessionId is provided
+        conversation_history = []
+        if request.sessionId:
+            history = db.get_conversation_history(request.sessionId)
+            # Format history for agent context (last 10 messages to avoid token overflow)
+            conversation_history = [
+                {"role": msg["role"], "content": msg["content"]} 
+                for msg in history[-10:]
+            ]
+        
         # Extract or use current site
         url = None
         if request.currentSite:
             url = request.currentSite
-        else:
+        elif request.sessionId:
+            # Get URL from session
+            session = db.get_site_session(request.sessionId)
+            if session:
+                url = session['url']
+        
+        if not url:
             # Try to extract URL from prompt
             url = await agent.extract_url(request.prompt)
         
-        # Process the message with the agent
-        result = await agent.process_user_message(request.prompt)
+        # Process the message with the agent (with conversation history)
+        result = await agent.process_user_message(request.prompt, conversation_history=conversation_history)
         
         # Extract site information from result
         detected_url = result.get('url') or url

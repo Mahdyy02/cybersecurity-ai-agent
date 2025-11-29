@@ -180,7 +180,8 @@ class SecurityAgent:
         
         try:
             if action_name == 'query_database':
-                result = await self._query_database(url, params.get('query_type', 'all'))
+                severity_filter = params.get('severity_filter')
+                result = await self._query_database(url, params.get('query_type', 'all'), severity_filter)
             
             elif action_name == 'info_gathering':
                 result = await self._run_info_gathering(url)
@@ -358,15 +359,23 @@ class SecurityAgent:
                 'message': str(e)
             }
     
-    async def _query_database(self, url: str, query_type: str = 'all') -> Dict:
-        """Query database for existing information"""
+    async def _query_database(self, url: str, query_type: str = 'all', severity_filter: Optional[List[str]] = None) -> Dict:
+        """
+        Query database for existing information
+        
+        Args:
+            url: Target URL
+            query_type: Type of data to query ('all', 'vulnerabilities', 'info', 'ports')
+            severity_filter: List of severity levels for vulnerabilities (e.g., ['High', 'Medium'])
+        """
         Logger.info(f"Querying database for: {query_type}")
         
         results = {
             'action': 'query_database',
             'status': 'success',
             'data': {},
-            'message': ''
+            'message': '',
+            'needs_scan': False
         }
         
         try:
@@ -388,13 +397,16 @@ class SecurityAgent:
                     import traceback
                     traceback.print_exc()
             
-            # Get vulnerabilities
+            # Get vulnerabilities with optional severity filtering
             if query_type in ['all', 'vulnerabilities', 'vulns']:
                 try:
-                    db_vulns = self.db.get_vulnerability_records(url)
+                    db_vulns = self.db.get_vulnerability_records(url, severity_filter=severity_filter)
                     if db_vulns:
                         results['data']['vulnerabilities'] = db_vulns
-                        Logger.success(f"Found {len(db_vulns)} vulnerabilities for {url}")
+                        if severity_filter:
+                            Logger.success(f"Found {len(db_vulns)} vulnerabilities (severity: {', '.join(severity_filter)}) for {url}")
+                        else:
+                            Logger.success(f"Found {len(db_vulns)} vulnerabilities for {url}")
                 except Exception as e:
                     Logger.error(f"Error fetching vulnerabilities: {str(e)}")
                     import traceback
@@ -403,19 +415,40 @@ class SecurityAgent:
             # Check if we found any data
             if not results['data']:
                 results['status'] = 'not_found'
-                results['message'] = f"No data found for {url}. Would you like me to scan it?"
+                results['needs_scan'] = True
+                results['message'] = f"No data found for {url}. Initiating scan..."
             else:
-                # Count findings
-                vuln_count = len(results['data'].get('vulnerabilities', []))
-                info_available = 'website_info' in results['data'] or 'info_records' in results['data']
-                
-                parts = []
-                if info_available:
-                    parts.append("website information")
-                if vuln_count > 0:
-                    parts.append(f"{vuln_count} vulnerabilities")
-                
-                results['message'] = f"Found {' and '.join(parts)} in database"
+                # Check if vulnerabilities query returned no results
+                if query_type in ['vulnerabilities', 'vulns', 'all']:
+                    if 'vulnerabilities' not in results['data'] or len(results['data']['vulnerabilities']) == 0:
+                        results['needs_scan'] = True
+                        if severity_filter:
+                            results['message'] = f"No {', '.join(severity_filter).lower()} severity vulnerabilities found. Performing scan..."
+                        else:
+                            results['message'] = f"No vulnerabilities found. Performing scan..."
+                    else:
+                        # Count findings
+                        vuln_count = len(results['data'].get('vulnerabilities', []))
+                        info_available = 'website_info' in results['data'] or 'info_records' in results['data']
+                        
+                        parts = []
+                        if info_available:
+                            parts.append("website information")
+                        if vuln_count > 0:
+                            if severity_filter:
+                                parts.append(f"{vuln_count} {', '.join(severity_filter).lower()} severity vulnerabilities")
+                            else:
+                                parts.append(f"{vuln_count} vulnerabilities")
+                        
+                        results['message'] = f"Found {' and '.join(parts)} in database"
+                else:
+                    # For non-vulnerability queries
+                    info_available = 'website_info' in results['data'] or 'info_records' in results['data']
+                    if info_available:
+                        results['message'] = "Found website information in database"
+                    else:
+                        results['needs_scan'] = True
+                        results['message'] = "No information found. Performing scan..."
             
             return results
             
@@ -425,7 +458,8 @@ class SecurityAgent:
                 'action': 'query_database',
                 'status': 'error',
                 'data': None,
-                'message': f"Error querying database: {str(e)}"
+                'message': f"Error querying database: {str(e)}",
+                'needs_scan': False
             }
     
     async def _display_info(self, url: str) -> Dict:
@@ -507,11 +541,13 @@ class SecurityAgent:
                             for vuln in data['vulnerabilities'][:10]:  # Limit to 10 for token size
                                 detailed_data.append({
                                     'type': 'vulnerability',
-                                    'name': vuln.get('type', 'Unknown'),
-                                    'location': vuln.get('url', 'Unknown'),
-                                    'severity': vuln.get('severity', 'Unknown'),
-                                    'details': vuln.get('details', 'No details'),
-                                    'recommendation': vuln.get('recommendation', 'No recommendation')
+                                    'name': vuln.get('Type', vuln.get('type', 'Unknown')),
+                                    'location': vuln.get('URL', vuln.get('url', 'Unknown')),
+                                    'severity': vuln.get('Severity', vuln.get('severity', 'Unknown')),
+                                    'details': vuln.get('Description', vuln.get('details', vuln.get('Evidence', 'No details'))),
+                                    'parameter': vuln.get('Parameter', 'N/A'),
+                                    'payload': vuln.get('Payload', 'N/A'),
+                                    'recommendation': vuln.get('Recommendation', vuln.get('recommendation', 'No recommendation'))
                                 })
                         
                         # Website info
@@ -593,28 +629,70 @@ class SecurityAgent:
         summary = "🔍 Security Assessment Results\n\n"
         
         if vulns:
-            summary += f"Found {len(vulns)} vulnerabilities:\n"
-            for v in vulns[:5]:
-                summary += f"- {v.get('name')} at {v.get('location')} (Severity: {v.get('severity')})\n"
+            # Count by severity
+            severity_count = {}
+            for v in vulns:
+                sev = v.get('severity', 'Unknown')
+                severity_count[sev] = severity_count.get(sev, 0) + 1
+            
+            summary += f"**Found {len(vulns)} vulnerabilities:**\n"
+            for sev, count in severity_count.items():
+                summary += f"  - {sev}: {count}\n"
+            summary += "\n**Top Issues:**\n"
+            for i, v in enumerate(vulns[:5], 1):
+                param = v.get('parameter', 'N/A')
+                summary += f"{i}. **{v.get('name')}** ({v.get('severity')})\n"
+                summary += f"   📍 Location: {v.get('location')}\n"
+                if param and param != 'N/A':
+                    summary += f"   🎯 Parameter: {param}\n"
+                summary += "\n"
         
         if exploits:
-            summary += f"\n{len(exploits)} exploits validated\n"
+            summary += f"\n✅ {len(exploits)} vulnerabilities validated through exploitation\n"
+        
+        if not vulns and not exploits:
+            summary = "✅ No significant vulnerabilities detected."
         
         return summary
     
-    async def process_user_message(self, user_message: str) -> Dict:
+    async def process_user_message(self, user_message: str, conversation_history: Optional[List[Dict]] = None) -> Dict:
         """
         Main entry point: Process user message and execute plan
-        Returns execution results and response for user
+        
+        Args:
+            user_message: Current user message
+            conversation_history: Previous messages in conversation [{"role": "user/assistant", "content": "..."}]
+        
+        Returns:
+            execution results and response for user
         """
         Logger.banner("Processing User Message")
         
         # Track process steps for frontend display
         process_steps = []
         
-        # Step 1: Extract URL
+        # Build context from conversation history
+        context_info = ""
+        if conversation_history and len(conversation_history) > 0:
+            context_info = "\n\nPREVIOUS CONVERSATION:\n"
+            for msg in conversation_history[-6:]:  # Last 6 messages for context
+                role = "User" if msg["role"] == "user" else "Assistant"
+                context_info += f"{role}: {msg['content'][:200]}...\n"  # Truncate long messages
+            Logger.info(f"Using conversation history with {len(conversation_history)} messages")
+        
+        # Step 1: Extract URL (check history first if no URL in current message)
         process_steps.append("🔍 Extracting URL from message...")
         url = await self.extract_url(user_message)
+        
+        # If no URL found in current message, check conversation history
+        if not url and conversation_history:
+            for msg in reversed(conversation_history):
+                if msg["role"] == "user":
+                    url = await self.extract_url(msg["content"])
+                    if url:
+                        Logger.info(f"Found URL in conversation history: {url}")
+                        break
+        
         if url:
             self.current_url = url
             process_steps.append(f"✓ URL detected: {url}")
@@ -624,9 +702,15 @@ class SecurityAgent:
         else:
             process_steps.append("⚠ No URL found")
         
-        # Step 2: Analyze intent and create plan
+        # Step 2: Analyze intent and create plan (with conversation context)
         process_steps.append("🤖 Analyzing intent and creating execution plan...")
-        plan = await self.analyze_intent(user_message, url)
+        
+        # Enhance user message with context for intent analysis
+        enhanced_message = user_message
+        if context_info:
+            enhanced_message = f"{context_info}\n\nCURRENT USER MESSAGE:\n{user_message}"
+        
+        plan = await self.analyze_intent(enhanced_message, url)
         if plan.get('actions'):
             process_steps.append(f"✓ Plan created: {len(plan['actions'])} action(s) to execute")
         
@@ -642,6 +726,8 @@ class SecurityAgent:
         
         # Step 4: Execute actions
         results = []
+        auto_scan_triggered = False
+        
         for action in plan.get('actions', []):
             action_name = action.get('action', 'unknown')
             process_steps.append(f"⚙️ Executing: {action_name}...")
@@ -657,8 +743,11 @@ class SecurityAgent:
             # Special handling for query_database action
             if action_name == 'query_database':
                 query_type = plan.get('query_type', 'all')
+                severity_filter = plan.get('severity_filter')
                 action['params'] = action.get('params', {})
                 action['params']['query_type'] = query_type
+                if severity_filter:
+                    action['params']['severity_filter'] = severity_filter
             
             # Check database if needed (for scan actions)
             if plan.get('check_database') and action_name != 'query_database':
@@ -694,12 +783,48 @@ class SecurityAgent:
             result = await self.execute_action(action, url)
             results.append(result)
             
+            # Check if auto-scan should be triggered (when query_database returns no data)
+            if action_name == 'query_database' and result.get('needs_scan') and plan.get('auto_scan_if_empty', False):
+                auto_scan_triggered = True
+                process_steps.append(f"🔍 No data found, triggering automatic scan...")
+                
+                # Run info gathering
+                process_steps.append(f"⚙️ Executing: info_gathering (auto)...")
+                info_result = await self._run_info_gathering(url)
+                results.append(info_result)
+                if info_result.get('status') == 'success':
+                    process_steps.append(f"✓ info_gathering completed successfully")
+                else:
+                    process_steps.append(f"✗ info_gathering failed: {info_result.get('message', 'Unknown error')}")
+                
+                # Run vulnerability scan
+                process_steps.append(f"⚙️ Executing: vulnerability_scan (auto)...")
+                vuln_result = await self._run_vulnerability_scan(url)
+                results.append(vuln_result)
+                if vuln_result.get('status') == 'success':
+                    process_steps.append(f"✓ vulnerability_scan completed successfully")
+                    
+                    # Re-query database to get filtered results
+                    severity_filter = plan.get('severity_filter')
+                    if severity_filter:
+                        process_steps.append(f"🔍 Filtering vulnerabilities by severity...")
+                        filtered_vulns = self.db.get_vulnerability_records(url, severity_filter=severity_filter)
+                        result['data'] = {'vulnerabilities': filtered_vulns}
+                        result['status'] = 'success'
+                        result['needs_scan'] = False
+                        if filtered_vulns:
+                            result['message'] = f"Found {len(filtered_vulns)} {', '.join(severity_filter).lower()} severity vulnerabilities"
+                        else:
+                            result['message'] = f"No {', '.join(severity_filter).lower()} severity vulnerabilities found"
+                else:
+                    process_steps.append(f"✗ vulnerability_scan failed: {vuln_result.get('message', 'Unknown error')}")
+            
             # Add completion status
             if result.get('status') == 'success':
                 process_steps.append(f"✓ {action_name} completed successfully")
             elif result.get('status') == 'cached':
                 process_steps.append(f"✓ {action_name} retrieved from cache")
-            else:
+            elif not auto_scan_triggered:  # Don't show error if we already triggered auto-scan
                 process_steps.append(f"✗ {action_name} failed: {result.get('message', 'Unknown error')}")
             
             # Wait for completion if needed

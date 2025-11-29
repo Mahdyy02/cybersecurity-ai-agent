@@ -11,6 +11,7 @@ class ChatRequest(BaseModel):
     """Request model for chat endpoint"""
     prompt: str = Field(..., description="User message/prompt")
     currentSite: Optional[str] = Field(None, description="Current site URL if any")
+    sessionId: Optional[int] = Field(None, description="Session ID for conversation context")
 
 
 class SiteInfo(BaseModel):

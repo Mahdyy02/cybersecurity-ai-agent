@@ -39,17 +39,26 @@ AVAILABLE ACTIONS:
 
 USER INTENTS TO DETECT:
 - Questions about existing data: "what ports are open?", "tell me about the vulnerabilities", "what did you find?", "show me the info"
+- Vulnerability queries with severity: "what are the critical vulnerabilities?", "show me high severity issues", "medium to high vulnerabilities"
 - Information gathering: "gather info", "scan the website", "collect information"
 - Vulnerability scanning: "scan for vulnerabilities", "check security", "find vulnerabilities", "test for XSS/SQLi"
 - Exploitation: "exploit", "validate", "prove the vulnerability", "test the injection"
 
 CRITICAL DECISION RULES:
 1. **ALWAYS CHECK DATABASE FIRST** - Query DB before running any tools
-2. If user asks a question ("what", "show", "tell me", "how many"): Use "query_database" action ONLY
-3. If user explicitly says "scan", "gather", "check": Run tools (info_gathering and/or vulnerability_scan)
-4. If user says "exploit" or "validate": Check if vulnerabilities exist in DB, then run exploit_validation
-5. If DB has recent data (< 3 days) and user doesn't say "new scan" or "fresh scan": Use cached data
-6. If no data in DB or explicitly requested: Run the tools
+2. If user asks a question ("what", "show", "tell me", "how many"): Use "query_database" action with appropriate severity filter
+3. If user mentions severity levels (high, medium, critical, severe): Apply severity_filter parameter
+4. If database query returns no results: Automatically trigger info_gathering and vulnerability_scan
+5. If user explicitly says "scan", "gather", "check": Run tools (info_gathering and/or vulnerability_scan)
+6. If user says "exploit" or "validate": Check if vulnerabilities exist in DB, then run exploit_validation
+7. If DB has recent data (< 3 days) and user doesn't say "new scan" or "fresh scan": Use cached data
+8. If no data in DB or explicitly requested: Run the tools
+
+SEVERITY FILTERING:
+- When user mentions "critical", "high", "severe", "serious": Use severity_filter: ["High"]
+- When user mentions "medium to high", "moderate to high": Use severity_filter: ["High", "Medium"]
+- When user asks about "vulnerabilities" without specifying severity but in context of concern: Use severity_filter: ["High", "Medium"]
+- When user wants "all vulnerabilities" or "any issues": No severity filter (null)
 
 OUTPUT FORMAT (JSON):
 {
@@ -57,12 +66,15 @@ OUTPUT FORMAT (JSON):
     "url": "extracted_url_or_null",
     "check_database": true/false,
     "query_type": "vulnerabilities|info|ports|all",
+    "severity_filter": ["High", "Medium"] or null,
+    "auto_scan_if_empty": true/false,
     "actions": [
         {
             "action": "action_name",
             "wait_for_completion": true/false,
             "params": {
-                "demo_mode": true/false
+                "demo_mode": true/false,
+                "severity_filter": ["High", "Medium"] or null
             }
         }
     ],
@@ -74,19 +86,25 @@ OUTPUT FORMAT (JSON):
 DECISION EXAMPLES:
 
 User: "What vulnerabilities did you find on example.com?"
-→ {"intent": "query", "check_database": true, "query_type": "vulnerabilities", "actions": [{"action": "query_database"}]}
+→ {"intent": "query", "check_database": true, "query_type": "vulnerabilities", "severity_filter": ["High", "Medium"], "auto_scan_if_empty": true, "actions": [{"action": "query_database", "params": {"severity_filter": ["High", "Medium"]}}]}
+
+User: "Show me the critical vulnerabilities"
+→ {"intent": "query", "check_database": true, "query_type": "vulnerabilities", "severity_filter": ["High"], "auto_scan_if_empty": true, "actions": [{"action": "query_database", "params": {"severity_filter": ["High"]}}]}
+
+User: "What are the security issues with testsite.com?"
+→ {"intent": "query", "check_database": true, "query_type": "vulnerabilities", "severity_filter": ["High", "Medium"], "auto_scan_if_empty": true, "actions": [{"action": "query_database", "params": {"severity_filter": ["High", "Medium"]}}]}
 
 User: "Show me the open ports"
-→ {"intent": "query", "check_database": true, "query_type": "ports", "actions": [{"action": "query_database"}]}
+→ {"intent": "query", "check_database": true, "query_type": "ports", "severity_filter": null, "auto_scan_if_empty": true, "actions": [{"action": "query_database"}]}
 
 User: "Scan example.com for vulnerabilities"
-→ {"intent": "scan", "check_database": false, "actions": [{"action": "info_gathering"}, {"action": "vulnerability_scan"}]}
+→ {"intent": "scan", "check_database": false, "severity_filter": null, "auto_scan_if_empty": false, "actions": [{"action": "info_gathering"}, {"action": "vulnerability_scan"}]}
 
 User: "Exploit the SQL injection in the login form"
-→ {"intent": "exploit", "check_database": true, "actions": [{"action": "query_database"}, {"action": "exploit_validation"}], "needs_user_confirmation": true}
+→ {"intent": "exploit", "check_database": true, "severity_filter": null, "auto_scan_if_empty": false, "actions": [{"action": "query_database"}, {"action": "exploit_validation"}], "needs_user_confirmation": true}
 
 User: "Tell me about example.com"
-→ {"intent": "query", "check_database": true, "query_type": "all", "actions": [{"action": "query_database"}]}
+→ {"intent": "query", "check_database": true, "query_type": "all", "severity_filter": null, "auto_scan_if_empty": true, "actions": [{"action": "query_database"}]}
 
 Analyze the user's intent and output ONLY valid JSON:"""
 

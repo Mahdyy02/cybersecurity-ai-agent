@@ -234,15 +234,22 @@ function normalizeSiteFromBackend(siteField) {
 // -------------------------------
 // Appel au backend FastAPI
 // -------------------------------
-async function callAgentAPI(prompt, currentSiteUrl) {
+async function callAgentAPI(prompt, currentSiteUrl, sessionId = null) {
   try {
+    const requestBody = {
+      prompt: prompt,
+      currentSite: currentSiteUrl
+    };
+    
+    // Include sessionId for conversation context if available
+    if (sessionId) {
+      requestBody.sessionId = sessionId;
+    }
+    
     const response = await fetch("http://localhost:8000/api/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt: prompt,
-        currentSite: currentSiteUrl
-      })
+      body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) {
@@ -396,10 +403,10 @@ chatFormEl.addEventListener("submit", async (event) => {
     renderConversation();
   }
 
-  // Appeler le backend
+  // Appeler le backend avec sessionId pour la mémoire de conversation
   let agentData;
   try {
-    agentData = await callAgentAPI(prompt, currentSiteUrl);
+    agentData = await callAgentAPI(prompt, currentSiteUrl, currentSiteId);
   } catch (err) {
     console.error(err);
     

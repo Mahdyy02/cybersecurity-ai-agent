@@ -821,18 +821,35 @@ class DatabaseManager:
         finally:
             session.close()
     
-    def get_vulnerability_records(self, url: str, max_age_days: int = 3) -> List[Dict[str, Any]]:
-        """Get cached vulnerability records for a URL"""
+    def get_vulnerability_records(self, url: str, max_age_days: int = 3, severity_filter: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """
+        Get cached vulnerability records for a URL
+        
+        Args:
+            url: Target URL to query
+            max_age_days: Maximum age of records in days
+            severity_filter: List of severity levels to include (e.g., ['High', 'Medium'])
+                           If None, returns all severities
+        
+        Returns:
+            List of vulnerability records matching criteria
+        """
         url = self._normalize_url(url)
         session = self.get_session()
         
         try:
             cutoff_date = datetime.utcnow() - timedelta(days=max_age_days)
             
-            records = session.query(VulnerabilityRecord).filter(
+            query = session.query(VulnerabilityRecord).filter(
                 VulnerabilityRecord.url.like(f"{url}%"),
                 VulnerabilityRecord.timestamp >= cutoff_date
-            ).order_by(VulnerabilityRecord.timestamp.desc()).all()
+            )
+            
+            # Apply severity filter if specified
+            if severity_filter:
+                query = query.filter(VulnerabilityRecord.severity.in_(severity_filter))
+            
+            records = query.order_by(VulnerabilityRecord.timestamp.desc()).all()
             
             return [
                 {
